@@ -70,6 +70,12 @@ export const POST = apiWrapper(async (req) => {
 
   if (action === "add_evidence") {
     const parsed = disputeEvidenceSchema.parse(body);
+    if (!parsed.disputeId) {
+      return NextResponse.json(
+        { error: "disputeId is required" },
+        { status: 400 },
+      );
+    }
     const result = await DisputeService.addEvidence(session.user.id, {
       disputeId: parsed.disputeId,
       type: parsed.type,

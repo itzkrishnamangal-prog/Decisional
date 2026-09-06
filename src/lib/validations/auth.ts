@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { phoneSchema, emailSchema, passwordSchema } from "@/lib/validations";
+import { MIN_WITHDRAWAL_AMOUNT_RUPEES } from "@/lib/constants";
 
 export const registerSchema = z.object({
 name: z.string().min(2, "Name must be at least 2 characters").max(80, "Name cannot exceed 80 characters"),
@@ -97,7 +98,10 @@ reason: z.string().max(500, "Reason cannot exceed 500 characters").optional(),
 });
 
 export const withdrawSchema = z.object({
-amount: z
-.number({ message: "Withdrawal amount must be a number" })
-.min(500, "Minimum withdrawal amount is INR 500"),
+  amount: z
+    .number({ message: "Withdrawal amount must be a number" })
+    .min(
+      MIN_WITHDRAWAL_AMOUNT_RUPEES,
+      `Minimum withdrawal amount is INR ${MIN_WITHDRAWAL_AMOUNT_RUPEES}`,
+    ),
 });

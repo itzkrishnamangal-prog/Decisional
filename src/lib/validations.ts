@@ -369,22 +369,22 @@ description: z
 });
 
 export const disputeEvidenceSchema = z.object({
-disputeId: dbIdSchema,
-type: z.string().trim().min(3),
-url: z
-.string()
-.trim()
-.refine((val) => {
-if (!val) return true;
-if (val.startsWith("/")) return true;
-try {
-const u = new URL(val);
-return u.protocol === "http:" || u.protocol === "https:";
-} catch {
-return false;
-}
-}, "Evidence link must be a valid URL or local path"),
-description: z.string().trim().max(500).optional(),
+  disputeId: dbIdSchema.optional(),
+  type: z.enum(["CONTRACT", "DELIVERABLE", "CHAT_LOG", "PAYMENT_PROOF", "OTHER"]),
+  url: z
+    .string()
+    .trim()
+    .refine((val) => {
+      if (!val) return true;
+      if (val.startsWith("/")) return true;
+      try {
+        const u = new URL(val);
+        return u.protocol === "http:" || u.protocol === "https:";
+      } catch {
+        return false;
+      }
+    }, "Evidence link must be a valid URL or local path"),
+  description: z.string().trim().min(5, "Description must be at least 5 characters").max(500),
 });
 
 // ==================== REVIEW SCHEMAS ====================

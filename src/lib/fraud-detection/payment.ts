@@ -1,8 +1,8 @@
 import prisma from "../db";
 import { logger } from "../logger";
 import { decrypt } from "../encryption";
-import { findPostByUrl, checkIsInstagramPostPublic, findPostByUrlDetailed } from "../instagram";
-import { getYouTubeVideo, extractVideoId, getFreshYouTubeAccessToken, getYouTubeVideoDetailed } from "../youtube";
+import { checkIsInstagramPostPublic, findPostByUrlDetailed } from "../instagram";
+import { extractVideoId, getFreshYouTubeAccessToken, getYouTubeVideoDetailed } from "../youtube";
 import { TRUST_SCORE_REVIEW_THRESHOLD } from "../constants";
 import { FraudCheckResult, FraudFlag, PaymentCheckParams, VerifiedPostData, PostVerificationParams } from "./types";
 import {

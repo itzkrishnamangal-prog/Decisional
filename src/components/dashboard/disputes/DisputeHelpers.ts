@@ -1,25 +1,8 @@
 import { z } from "zod";
+export { disputeEvidenceSchema } from "@/lib/validations";
 
 export const disputeEscalationSchema = z.object({
-reason: z.string().min(10, "Reason must be at least 10 characters").max(500),
-});
-
-export const disputeEvidenceSchema = z.object({
-type: z.enum(["CONTRACT", "DELIVERABLE", "CHAT_LOG", "PAYMENT_PROOF", "OTHER"]),
-url: z
-.string()
-.trim()
-.refine((val) => {
-if (!val) return true;
-if (val.startsWith("/")) return true;
-try {
-const u = new URL(val);
-return u.protocol === "http:" || u.protocol === "https:";
-} catch {
-return false;
-}
-}, "Please enter a valid URL or local path"),
-description: z.string().min(5, "Description must be at least 5 characters").max(500),
+  reason: z.string().min(10, "Reason must be at least 10 characters").max(500),
 });
 
 export interface Finding {
