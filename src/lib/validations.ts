@@ -3,7 +3,6 @@
 */
 
 import { z } from "zod";
-import { env } from "@/env";
 
 /**
 * Database primary ID checker.
@@ -349,24 +348,6 @@ action: z.literal("confirm_received"),
 }),
 ]);
 
-// ==================== PAYMENT SCHEMAS ====================
-
-export const withdrawalSchema = z.object({
-amount: z
-  .number()
-  .int()
-  .min(
-    env?.MIN_WITHDRAWAL_AMOUNT ?? 50000,
-    `Minimum withdrawal limit is INR ${(env?.MIN_WITHDRAWAL_AMOUNT ?? 50000) / 100} (${env?.MIN_WITHDRAWAL_AMOUNT ?? 50000} paise)`,
-  ),
-bankAccountName: z.string().trim().min(2, "Invalid Account Name constraint"),
-bankAccountNumber: z
-.string()
-.trim()
-.regex(/^\d{9,18}$/, "Bank Account Must primarily consist of 9-18 exact digits"),
-ifscCode: z.string().trim().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, "Must be a valid standardized 11-digit IFSC code"),
-upiId: z.string().trim().regex(/^[\w.-]+@[\w.-]+$/, "Please submit a standard UPI ID format").optional(),
-});
 
 // ==================== DISPUTE SCHEMAS ====================
 
