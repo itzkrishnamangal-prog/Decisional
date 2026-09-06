@@ -356,8 +356,8 @@ amount: z
   .number()
   .int()
   .min(
-    env.MIN_WITHDRAWAL_AMOUNT,
-    `Minimum withdrawal limit is INR ${env.MIN_WITHDRAWAL_AMOUNT / 100} (${env.MIN_WITHDRAWAL_AMOUNT} paise)`,
+    env?.MIN_WITHDRAWAL_AMOUNT ?? 50000,
+    `Minimum withdrawal limit is INR ${(env?.MIN_WITHDRAWAL_AMOUNT ?? 50000) / 100} (${env?.MIN_WITHDRAWAL_AMOUNT ?? 50000} paise)`,
   ),
 bankAccountName: z.string().trim().min(2, "Invalid Account Name constraint"),
 bankAccountNumber: z

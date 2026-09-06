@@ -298,68 +298,72 @@ message: "S3_ENDPOINT is required for Cloudflare R2.",
 }
 }
 
+const isServer = typeof window === "undefined";
+
 const _env = envSchema.safeParse(process.env);
 
 if (!_env.success) {
-const errorMessage = `Invalid environment variables:\n${JSON.stringify(
-_env.error.format(),
-null,
-2,
-)}`;
+  const errorMessage = `Invalid environment variables:\n${JSON.stringify(
+    _env.error.format(),
+    null,
+    2,
+  )}`;
 
-if (!isBuildTime) {
-console.error(errorMessage);
-throw new Error(
-"Application cannot start: missing or invalid environment variables. Check server logs.",
-);
-} else {
-// During build, log but don't throw. Vercel injects runtime secrets separately.
-console.warn("[BUILD] Environment variable warning:", errorMessage);
-}
+  if (!isBuildTime && isServer) {
+    console.error(errorMessage);
+    throw new Error(
+      "Application cannot start: missing or invalid environment variables. Check server logs.",
+    );
+  } else if (isBuildTime) {
+    // During build, log warning but don't throw. Vercel injects runtime secrets separately.
+    console.warn("[BUILD] Environment variable warning:", errorMessage);
+  }
 }
 
 // Security: in production runtime, never fall back to raw process.env.
 if (
-!_env.success &&
-!isBuildTime &&
-typeof window === "undefined" &&
-process.env.NODE_ENV === "production"
+  !_env.success &&
+  !isBuildTime &&
+  isServer &&
+  process.env.NODE_ENV === "production"
 ) {
-throw new Error(
-`[FATAL] Environment validation failed in production. Fix .env before deploying.\n${_env.error?.message ?? "Unknown validation error"}`,
-);
+  throw new Error(
+    `[FATAL] Environment validation failed in production. Fix .env before deploying.\n${_env.error?.message ?? "Unknown validation error"}`,
+  );
 }
 
-export const env = _env.success
-? _env.data
-: (process.env as unknown as z.infer<typeof envSchema>);
+export const env = (_env.success
+  ? _env.data
+  : (process.env as unknown as z.infer<typeof envSchema>)) as z.infer<typeof envSchema>;
 
-if (_env.success && env.NODE_ENV !== "production" && !env.CONTRACT_SIGNING_SECRET) {
-console.warn(
-"\x1b[33m%s\x1b[0m",
-"[WARNING] CONTRACT_SIGNING_SECRET is not set in non-production environment. Contract signing and verification will throw errors until it is configured.",
-);
-}
+if (isServer) {
+  if (_env.success && env.NODE_ENV !== "production" && !env.CONTRACT_SIGNING_SECRET) {
+    console.warn(
+      "\x1b[33m%s\x1b[0m",
+      "[WARNING] CONTRACT_SIGNING_SECRET is not set in non-production environment. Contract signing and verification will throw errors until it is configured.",
+    );
+  }
 
-// Placeholder / ungenerated secret detection
-// Catches secrets that were copy-pasted from .env as-is without running `openssl rand -hex 32`.
-const PLACEHOLDER_PREFIXES = ["generate-with:", "your_", "change_in_production", "xxx"];
-const CRITICAL_SECRETS = [
-"CRON_SECRET",
-"CONTRACT_SIGNING_SECRET",
-"SIGNING_SECRET",
-"HMAC_KEY",
-"NEXTAUTH_SECRET",
-] as const;
+  // Placeholder / ungenerated secret detection
+  // Catches secrets that were copy-pasted from .env as-is without running `openssl rand -hex 32`.
+  const PLACEHOLDER_PREFIXES = ["generate-with:", "your_", "change_in_production", "xxx"];
+  const CRITICAL_SECRETS = [
+    "CRON_SECRET",
+    "CONTRACT_SIGNING_SECRET",
+    "SIGNING_SECRET",
+    "HMAC_KEY",
+    "NEXTAUTH_SECRET",
+  ] as const;
 
-for (const key of CRITICAL_SECRETS) {
-const val = process.env[key];
-if (val && PLACEHOLDER_PREFIXES.some((prefix) => val.toLowerCase().startsWith(prefix))) {
-const msg = `[SECURITY] ${key} contains an ungenerated placeholder value ("${val.slice(0, 20)}..."). Run: openssl rand -hex 32`;
-if (process.env.NODE_ENV === "production") {
-throw new Error(msg);
-} else {
-console.warn("\x1b[31m%s\x1b[0m", msg);
-}
-}
+  for (const key of CRITICAL_SECRETS) {
+    const val = process.env[key];
+    if (val && PLACEHOLDER_PREFIXES.some((prefix) => val.toLowerCase().startsWith(prefix))) {
+      const msg = `[SECURITY] ${key} contains an ungenerated placeholder value ("${val.slice(0, 20)}..."). Run: openssl rand -hex 32`;
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(msg);
+      } else {
+        console.warn("\x1b[31m%s\x1b[0m", msg);
+      }
+    }
+  }
 }
