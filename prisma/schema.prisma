@@ -590,9 +590,10 @@ model Deal {
   startedAt DateTime?
 
   // Post Monitoring
-  isPostAlive    Boolean   @default(true)
-  lastPostCheck  DateTime?
-  postCheckCount Int       @default(0)
+  isPostAlive              Boolean   @default(true)
+  lastPostCheck            DateTime?
+  postCheckCount           Int       @default(0)
+  consecutiveMissingChecks Int       @default(0)
 
   // Completion
   completedAt DateTime?

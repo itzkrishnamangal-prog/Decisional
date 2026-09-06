@@ -124,6 +124,7 @@ completedAt: true,
 verifiedAt: true,
 postedAt: true,
 influencerId: true,
+consecutiveMissingChecks: true,
 influencer: { select: { userId: true } },
 },
 });
@@ -152,7 +153,7 @@ el.startsWith("#"),
 );
 
 // Use existing fraud detection logic to check URL validity/access
-const checkResult = await checkPostVerification({
+let checkResult = await checkPostVerification({
 dealId: deal.id,
 influencerUserId: deal.influencer?.userId || "",
 postUrl: deal.postUrl,
@@ -161,7 +162,28 @@ requiredHashtags,
 postingDeadline: deal.postingDeadline,
 });
 
+// Retry with backoff if check failed due to transient API/token/network issue
+if (checkResult.flags.some((f) => f.rule === "POST_VERIFICATION_CHECK_FAILED")) {
+for (let retry = 1; retry <= 2; retry++) {
+await new Promise((resolve) => setTimeout(resolve, retry * 1500));
+checkResult = await checkPostVerification({
+dealId: deal.id,
+influencerUserId: deal.influencer?.userId || "",
+postUrl: deal.postUrl,
+requiredTags,
+requiredHashtags,
+postingDeadline: deal.postingDeadline,
+});
+if (!checkResult.flags.some((f) => f.rule === "POST_VERIFICATION_CHECK_FAILED")) {
+break;
+}
+}
+}
+
 // Determine status based on flags
+const isCheckFailed = checkResult.flags.some(
+(f) => f.rule === "POST_VERIFICATION_CHECK_FAILED" || f.rule === "OFFICIAL_VERIFICATION_UNAVAILABLE",
+);
 const isUnreachable = checkResult.flags.some(
 (f) => f.rule === "POST_NO_LONGER_ACCESSIBLE",
 );
@@ -175,35 +197,97 @@ const monitoringDay = referenceDate
 )
 : 0;
 
-if (isUnreachable) {
-await handlePostFailure(deal, "DELETED", monitoringDay);
+// 1. Transient Check Failure: Do NOT mark deleted and do NOT execute clawback
+if (isCheckFailed && !isUnreachable && !isPrivate) {
+logger.warn("Post check inconclusive due to transient API error; skipping clawback and retaining post status", {
+dealId,
+flags: checkResult.flags,
+});
+await prisma.deal.update({
+where: { id: dealId },
+data: {
+lastPostCheck: new Date(),
+postCheckCount: { increment: 1 },
+},
+});
 return {
 dealId,
-isAlive: false,
-status: "DELETED",
-message: "Post URL is unreachable",
+isAlive: true,
+status: "ACTIVE",
+message: "Post check inconclusive due to transient API failure; clawback deferred",
 monitoringDay,
 };
 }
 
-if (isPrivate) {
-await handlePostFailure(deal, "PRIVATE", monitoringDay);
+// 2. Confirmed Unreachable or Private
+if (isUnreachable || isPrivate) {
+const failureStatus: "DELETED" | "PRIVATE" = isUnreachable ? "DELETED" : "PRIVATE";
+const currentConsecutive = deal.consecutiveMissingChecks ?? 0;
+const newConsecutive = currentConsecutive + 1;
+
+if (newConsecutive < 2) {
+// 1st confirmed deletion check: Warn creator, give 24h grace period, do NOT execute clawback
+await prisma.deal.update({
+where: { id: dealId },
+data: {
+consecutiveMissingChecks: newConsecutive,
+lastPostCheck: new Date(),
+postCheckCount: { increment: 1 },
+},
+});
+
+if (deal.influencer?.userId) {
+await NotificationService.createNotification({
+userId: deal.influencer.userId,
+type: "trust_warning",
+title: "Action Required: Post Not Detected",
+message: `Our monitoring could not locate your post for deal #${deal.id.slice(-6)} on day ${monitoringDay}. Please ensure the post is public. If unconfirmed on the next daily check, automated clawback will be initiated.`,
+data: { dealId: deal.id, monitoringDay, checkNumber: 1 },
+});
+}
+
+logger.warn("Post confirmed missing on first check; 24h grace warning issued to creator, clawback withheld pending 2nd consecutive check", {
+dealId,
+status: failureStatus,
+monitoringDay,
+consecutiveMissingChecks: newConsecutive,
+});
+
 return {
 dealId,
-isAlive: false,
-status: "PRIVATE",
-message: "Post is private",
+isAlive: true,
+status: failureStatus,
+message: "First confirmed missing check; 24h grace warning issued, clawback pending next check",
 monitoringDay,
 };
 }
 
-// Update monitoring stats
+// 2+ consecutive confirmed deletions: Proceed with clawback
+await prisma.deal.update({
+where: { id: dealId },
+data: {
+consecutiveMissingChecks: newConsecutive,
+},
+});
+
+await handlePostFailure(deal, failureStatus, monitoringDay);
+return {
+dealId,
+isAlive: false,
+status: failureStatus,
+message: `Post confirmed ${failureStatus.toLowerCase()} across ${newConsecutive} consecutive checks`,
+monitoringDay,
+};
+}
+
+// 3. Post is alive and active: Reset consecutive missing count
 await prisma.deal.update({
 where: { id: dealId },
 data: {
 lastPostCheck: new Date(),
 postCheckCount: { increment: 1 },
 isPostAlive: true,
+consecutiveMissingChecks: 0,
 },
 });
 

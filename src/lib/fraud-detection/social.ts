@@ -3,7 +3,7 @@ import { logger } from "../logger";
 import { decrypt } from "../encryption";
 import { Prisma } from "@prisma/client";
 import { FraudCheckResult, FraudFlag, PostVerificationParams, GrowthCheckParams, FakePostTimingParams, EngagementAnomalyParams, VerifiedPostData } from "./types";
-import { fetchInstagramPostData, fetchYouTubePostData, runVerificationRules } from "./payment";
+import { fetchInstagramPostDataDetailed, fetchYouTubePostDataDetailed, runVerificationRules } from "./payment";
 import { findPostByUrl } from "../instagram";
 import { extractVideoId, getYouTubeVideo } from "../youtube";
 import { resolveFraudAction } from "./utils";
@@ -19,33 +19,49 @@ let verifiedPostData: VerifiedPostData | null = null;
 
 // Deep Verification: If it's Instagram, try to use Official API if we have a token
 if (params.postUrl.includes("instagram.com")) {
-const igData = await fetchInstagramPostData(params.postUrl, params.influencerUserId);
-if (igData) {
-verifiedPostData = igData;
+const igResult = await fetchInstagramPostDataDetailed(params.postUrl, params.influencerUserId);
+if (igResult.status === "FOUND") {
+verifiedPostData = igResult.data;
 logger.info("Deep verification used for Instagram post", { dealId: params.dealId });
-} else if (params.influencerUserId) {
+} else if (igResult.status === "CONFIRMED_DELETED") {
 flags.push({
 rule: "POST_NO_LONGER_ACCESSIBLE",
 severity: "CRITICAL",
-description: "Instagram post not found in recent media (deleted or private)",
+description: igResult.reason || "Instagram post not found in recent media (deleted or private)",
 });
 riskScore += 80;
+} else {
+// Transient check failure (API error, rate limit, token issue)
+flags.push({
+rule: "POST_VERIFICATION_CHECK_FAILED",
+severity: "MEDIUM",
+description: `Instagram verification check failed: ${igResult.reason}`,
+});
+riskScore += 10;
 }
 }
 
 // Deep Verification: If it's YouTube
 if (!verifiedPostData && (params.postUrl.includes("youtube.com") || params.postUrl.includes("youtu.be"))) {
-const ytData = await fetchYouTubePostData(params.postUrl, params.influencerUserId);
-if (ytData) {
-verifiedPostData = ytData;
+const ytResult = await fetchYouTubePostDataDetailed(params.postUrl, params.influencerUserId);
+if (ytResult.status === "FOUND") {
+verifiedPostData = ytResult.data;
 logger.info("Deep verification used for YouTube video", { dealId: params.dealId });
-} else {
+} else if (ytResult.status === "CONFIRMED_DELETED") {
 flags.push({
 rule: "POST_NO_LONGER_ACCESSIBLE",
 severity: "CRITICAL",
-description: "YouTube video not found (deleted or private)",
+description: ytResult.reason || "YouTube video not found (deleted or private)",
 });
 riskScore += 80;
+} else {
+// Transient check failure (API error, rate limit, quota issue)
+flags.push({
+rule: "POST_VERIFICATION_CHECK_FAILED",
+severity: "MEDIUM",
+description: `YouTube verification check failed: ${ytResult.reason}`,
+});
+riskScore += 10;
 }
 }
 
@@ -57,6 +73,15 @@ passed: false,
 flags,
 riskScore,
 action: "BLOCK",
+};
+}
+const isCheckFailed = flags.some((f) => f.rule === "POST_VERIFICATION_CHECK_FAILED");
+if (isCheckFailed) {
+return {
+passed: false,
+flags,
+riskScore,
+action: "REVIEW",
 };
 }
 return {

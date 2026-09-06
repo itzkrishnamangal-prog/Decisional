@@ -308,10 +308,10 @@ if (userIdsToCheck.length === 0) {
 return { lifted: 0 };
 }
 
-// 2. Check which users still have active suspensions OR a permanent ban
+  // 2. Check which users still have active suspensions OR a permanent ban
   // Must exclude: any still-active TEMP_SUSPENSION, any PERMANENT_BAN (expiresAt:null), any open indefinite violation
+  // Note: No take cap here, because take: 100 could under-fetch and inadvertently reinstate a permanently banned user
   const stillActive = await prisma.userViolation.findMany({
-    take: 100,
     where: {
       userId: { in: userIdsToCheck },
       OR: [
@@ -321,6 +321,7 @@ return { lifted: 0 };
       ],
     },
     select: { userId: true },
+    distinct: ["userId"],
   });
 
 const stillActiveSet = new Set(stillActive.map((v: { userId: string }) => v.userId));

@@ -17,12 +17,25 @@ const BRAND_WALLET_PAISE = 100_000 * 100; // Rs 1,00,000
 
 async function upsertUser(email: string, phone: string, userType: "INFLUENCER" | "BRAND" | "ADMIN") {
   const passwordHash = await bcrypt.hash(PASSWORD, 12);
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: { status: "ACTIVE", verificationLevel: "FULL", emailVerified: true, phoneVerified: true, passwordHash },
-    create: { email, phone, passwordHash, userType, status: "ACTIVE", verificationLevel: "FULL", emailVerified: true, phoneVerified: true },
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [{ email }, { phone }],
+    },
   });
-  console.log("+ User [" + userType + "] upserted: " + email + " (id: " + user.id + ")");
+
+  if (existing) {
+    const user = await prisma.user.update({
+      where: { id: existing.id },
+      data: { email, phone, status: "ACTIVE", verificationLevel: "FULL", emailVerified: true, phoneVerified: true, passwordHash, userType },
+    });
+    console.log("+ User [" + userType + "] updated: " + email + " (id: " + user.id + ")");
+    return user;
+  }
+
+  const user = await prisma.user.create({
+    data: { email, phone, passwordHash, userType, status: "ACTIVE", verificationLevel: "FULL", emailVerified: true, phoneVerified: true },
+  });
+  console.log("+ User [" + userType + "] created: " + email + " (id: " + user.id + ")");
   return user;
 }
 

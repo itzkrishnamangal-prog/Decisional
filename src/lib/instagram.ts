@@ -259,6 +259,83 @@ return allPosts;
 }
 }
 
+export type InstagramPostFetchResult =
+  | { status: "FOUND"; post: InstagramPost }
+  | { status: "NOT_FOUND" }
+  | { status: "API_ERROR"; error: string };
+
+/**
+* Find a specific post with distinction between found, confirmed absent, and API/network failure.
+*/
+export async function findPostByUrlDetailed(
+  accessToken: string,
+  postUrl: string,
+): Promise<InstagramPostFetchResult> {
+  if (!accessToken) {
+    return { status: "API_ERROR", error: "No Instagram access token provided" };
+  }
+
+  const fields =
+    "id,media_type,media_url,permalink,caption,timestamp,like_count,comments_count,is_paid_partnership";
+  let nextUrl: string | null = `${GRAPH_API_BASE}/${GRAPH_API_VERSION}/me/media?fields=${fields}&limit=50&access_token=${accessToken}`;
+  const target = cleanUrl(postUrl);
+  let checkedCount = 0;
+
+  try {
+    while (nextUrl && checkedCount < 150) {
+      const res: Response = await fetch(nextUrl);
+      if (!res.ok) {
+        logger.error("Instagram API HTTP error during post search", { status: res.status });
+        return { status: "API_ERROR", error: `Instagram API HTTP ${res.status}` };
+      }
+      const data = (await res.json()) as {
+        error?: { message: string };
+        data?: Array<Record<string, unknown>>;
+        paging?: { next?: string };
+      };
+
+      if (data.error) {
+        logger.error("Instagram API error during post search", { message: data.error.message });
+        return { status: "API_ERROR", error: data.error.message };
+      }
+
+      if (!data.data || data.data.length === 0) {
+        break;
+      }
+
+      for (const rawPost of data.data) {
+        checkedCount++;
+        const post: InstagramPost = {
+          id: rawPost.id as string,
+          mediaType: rawPost.media_type as "IMAGE" | "VIDEO" | "CAROUSEL_ALBUM",
+          mediaUrl: (rawPost.media_url as string) || "",
+          permalink: (rawPost.permalink as string) || "",
+          caption: (rawPost.caption as string) || "",
+          timestamp: rawPost.timestamp as string,
+          likeCount: (rawPost.like_count as number) || 0,
+          commentsCount: (rawPost.comments_count as number) || 0,
+          isLive: true,
+          isPaidPartnership: (rawPost.is_paid_partnership as boolean) || false,
+        };
+
+        if (cleanUrl(post.permalink) === target) {
+          return { status: "FOUND", post };
+        }
+      }
+
+      nextUrl = data.paging?.next || null;
+    }
+
+    return { status: "NOT_FOUND" };
+  } catch (error) {
+    logger.error("Instagram posts fetch error", error);
+    return {
+      status: "API_ERROR",
+      error: error instanceof Error ? error.message : "Network error fetching Instagram posts",
+    };
+  }
+}
+
 /**
 * Find a specific post by its permalink among recent posts.
 */
@@ -266,10 +343,8 @@ export async function findPostByUrl(
   accessToken: string,
   postUrl: string,
 ): Promise<InstagramPost | null> {
-  const posts = await getRecentPosts(accessToken, 150); // Check last 150
-  const target = cleanUrl(postUrl);
-
-  return posts.find((p) => cleanUrl(p.permalink) === target) || null;
+  const result = await findPostByUrlDetailed(accessToken, postUrl);
+  return result.status === "FOUND" ? result.post : null;
 }
 
 

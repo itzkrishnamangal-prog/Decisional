@@ -401,52 +401,82 @@ return null;
 
 // ==================== VIDEO DATA ====================
 
+export type YouTubeVideoFetchResult =
+  | { status: "FOUND"; video: YouTubeVideo }
+  | { status: "NOT_FOUND" }
+  | { status: "API_ERROR"; error: string };
+
+/**
+* Fetch video details with explicit distinction between found, confirmed deleted, and API/network failure.
+*/
+export async function getYouTubeVideoDetailed(
+  videoId: string,
+  accessToken?: string,
+): Promise<YouTubeVideoFetchResult> {
+  const apiKey = process.env.YOUTUBE_API_KEY || "";
+  if (!apiKey && !accessToken) {
+    logger.warn(
+      "Neither YOUTUBE_API_KEY nor accessToken provided video fetch skipped",
+    );
+    return { status: "API_ERROR", error: "Neither YOUTUBE_API_KEY nor accessToken provided" };
+  }
+
+  try {
+    const data = await fetchYouTube("/videos", {
+      part: "snippet,statistics,contentDetails,status",
+      id: videoId,
+    }, accessToken);
+
+    if (data.error) {
+      logger.error("YouTube API error", {
+        reason: data.error.errors?.[0]?.reason || "Unknown",
+        message: data.error.message,
+      });
+      return { status: "API_ERROR", error: data.error.message || "YouTube API error" };
+    }
+
+    if (!data.items || data.items.length === 0) {
+      return { status: "NOT_FOUND" };
+    }
+
+    const video = data.items[0];
+    return {
+      status: "FOUND",
+      video: {
+        id: video.id,
+        title: video.snippet.title,
+        description: video.snippet.description || "",
+        thumbnail:
+          video.snippet.thumbnails?.high?.url ||
+          video.snippet.thumbnails?.default?.url ||
+          "",
+        publishedAt: video.snippet.publishedAt,
+        viewCount: Number.parseInt(video.statistics?.viewCount || "0", 10),
+        likeCount: Number.parseInt(video.statistics?.likeCount || "0", 10),
+        commentCount: Number.parseInt(video.statistics?.commentCount || "0", 10),
+        duration: video.contentDetails.duration,
+        isLive: video.status?.privacyStatus === "public",
+        privacyStatus: video.status?.privacyStatus,
+      },
+    };
+  } catch (error) {
+    logger.error("YouTube video fetch error", error, { videoId });
+    return {
+      status: "API_ERROR",
+      error: error instanceof Error ? error.message : "Network error fetching YouTube video",
+    };
+  }
+}
+
 /**
 * Fetch video details by video ID.
 */
 export async function getYouTubeVideo(
-videoId: string,
-accessToken?: string,
+  videoId: string,
+  accessToken?: string,
 ): Promise<YouTubeVideo | null> {
-const apiKey = process.env.YOUTUBE_API_KEY || "";
-if (!apiKey && !accessToken) {
-logger.warn(
-"Neither YOUTUBE_API_KEY nor accessToken provided video fetch skipped",
-);
-return null;
-}
-
-try {
-const data = await fetchYouTube("/videos", {
-part: "snippet,statistics,contentDetails,status",
-id: videoId,
-}, accessToken);
-
-if (data.error || !data.items || data.items.length === 0) {
-return null;
-}
-
-const video = data.items[0];
-  return {
-    id: video.id,
-    title: video.snippet.title,
-    description: video.snippet.description || "",
-    thumbnail:
-      video.snippet.thumbnails?.high?.url ||
-      video.snippet.thumbnails?.default?.url ||
-      "",
-    publishedAt: video.snippet.publishedAt,
-    viewCount: Number.parseInt(video.statistics?.viewCount || "0", 10),
-    likeCount: Number.parseInt(video.statistics?.likeCount || "0", 10),
-    commentCount: Number.parseInt(video.statistics?.commentCount || "0", 10),
-    duration: video.contentDetails.duration,
-    isLive: video.status?.privacyStatus === "public",
-    privacyStatus: video.status?.privacyStatus,
-  };
-} catch (error) {
-logger.error("YouTube video fetch error", error, { videoId });
-return null;
-}
+  const result = await getYouTubeVideoDetailed(videoId, accessToken);
+  return result.status === "FOUND" ? result.video : null;
 }
 
 /**

@@ -8,11 +8,19 @@ import { logger } from "@/lib/logger";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
 import { claimIdempotencyKey, releaseIdempotencyKey, saveIdempotencyResponse, type IdempotencyCheckResult } from "@/lib/idempotency";
+import { env } from "@/env";
 
 const withdrawalSchema = z.object({
   amount: z.preprocess(
     Number,
-    z.number().int().positive().min(50000, "Minimum withdrawal is INR 500"),
+    z
+      .number()
+      .int()
+      .positive()
+      .min(
+        env.MIN_WITHDRAWAL_AMOUNT,
+        `Minimum withdrawal is INR ${env.MIN_WITHDRAWAL_AMOUNT / 100}`,
+      ),
   ),
   /**
    * bankAccountId is the ONLY accepted payment destination.

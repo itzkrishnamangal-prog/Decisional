@@ -1,8 +1,9 @@
 import prisma from "../db";
 import { logger } from "../logger";
 import { decrypt } from "../encryption";
-import { findPostByUrl, checkIsInstagramPostPublic } from "../instagram";
-import { getYouTubeVideo, extractVideoId, getFreshYouTubeAccessToken } from "../youtube";
+import { findPostByUrl, checkIsInstagramPostPublic, findPostByUrlDetailed } from "../instagram";
+import { getYouTubeVideo, extractVideoId, getFreshYouTubeAccessToken, getYouTubeVideoDetailed } from "../youtube";
+import { TRUST_SCORE_REVIEW_THRESHOLD } from "../constants";
 import { FraudCheckResult, FraudFlag, PaymentCheckParams, VerifiedPostData, PostVerificationParams } from "./types";
 import {
 checkWithdrawalVelocityAndLimits,
@@ -42,7 +43,7 @@ description: "Large withdrawal from account less than 30 days old",
 riskScore += 55;
 }
 
-if (user.trustScore < 600) {
+if (user.trustScore < TRUST_SCORE_REVIEW_THRESHOLD) {
 flags.push({
 rule: "LOW_TRUST_SCORE_WITHDRAWAL",
 severity: "HIGH",
@@ -70,68 +71,149 @@ action,
 // ==================== POST VERIFICATION CHECKS ====================
 
 
-export async function fetchInstagramPostData(postUrl: string, userId?: string): Promise<VerifiedPostData | null> {
-if (!postUrl.includes("instagram.com") || !userId) return null;
-try {
-const oauth = await prisma.oAuthAccount.findFirst({
-where: { userId, provider: "instagram" },
-select: { accessToken: true },
-});
-const decryptedAccessToken = oauth?.accessToken ? decrypt(oauth.accessToken) : null;
-if (decryptedAccessToken) {
-const igPost = await findPostByUrl(decryptedAccessToken, postUrl);
-        if (igPost) {
-          const caption = igPost.caption ?? "";
-          return {
-            isPublic: await checkIsInstagramPostPublic(igPost.permalink),
-            caption,
-            isPaidPartnership: igPost.isPaidPartnership ?? false,
-            mentions: [...(caption.match(/@(\w+)/g) || [])].map((m) => m.slice(1)),
-            hashtags: [...(caption.match(/#(\w+)/g) || [])].map((h) => h.slice(1)),
-            postTimestamp: new Date(igPost.timestamp),
-            likeCount: igPost.likeCount,
-            commentCount: igPost.commentsCount,
-            // viewCount: not available in basic IG Graph API without Insights scope
-          };
-        }
-}
-} catch (apiError) {
-logger.warn("Instagram official verification failed", {
-error: apiError instanceof Error ? apiError.message : String(apiError),
-});
-}
-return null;
-}
+export type PostVerificationFetchResult =
+  | { status: "FOUND"; data: VerifiedPostData }
+  | { status: "CONFIRMED_DELETED"; reason: string }
+  | { status: "CHECK_FAILED"; reason: string };
 
-export async function fetchYouTubePostData(postUrl: string, userId?: string): Promise<VerifiedPostData | null> {
-const youtubeId = extractVideoId(postUrl);
-if (!youtubeId) return null;
-try {
-let accessToken: string | undefined;
-if (userId) {
-accessToken = (await getFreshYouTubeAccessToken(userId)) ?? undefined;
-}
-    const ytVideo = await getYouTubeVideo(youtubeId, accessToken);
-    if (ytVideo) {
-      const isPublic = ytVideo.privacyStatus ? ytVideo.privacyStatus === "public" : true;
+export async function fetchInstagramPostDataDetailed(
+  postUrl: string,
+  userId?: string,
+): Promise<PostVerificationFetchResult> {
+  if (!postUrl.includes("instagram.com")) {
+    return { status: "CHECK_FAILED", reason: "URL is not an Instagram link" };
+  }
+  if (!userId) {
+    return { status: "CHECK_FAILED", reason: "User ID not provided for Instagram verification" };
+  }
+
+  try {
+    const oauth = await prisma.oAuthAccount.findFirst({
+      where: { userId, provider: "instagram" },
+      select: { accessToken: true },
+    });
+    const decryptedAccessToken = oauth?.accessToken ? decrypt(oauth.accessToken) : null;
+    if (!decryptedAccessToken) {
       return {
-        isPublic,
-        isPaidPartnership: false,
-        caption: ytVideo.description,
-        mentions: [...(ytVideo.description.match(/@([\w.-]+)/g) || [])].map((m) => m.slice(1)),
-        hashtags: [...(ytVideo.description.match(/#(\w+)/g) || [])].map((h) => h.slice(1)),
-        postTimestamp: new Date(ytVideo.publishedAt),
-        likeCount: ytVideo.likeCount,
-        commentCount: ytVideo.commentCount,
-        viewCount: ytVideo.viewCount,
+        status: "CHECK_FAILED",
+        reason: "No connected Instagram OAuth account or access token found",
       };
     }
-} catch (apiError) {
-logger.warn("YouTube official verification failed", {
-error: apiError instanceof Error ? apiError.message : String(apiError),
-});
+
+    const igPostResult = await findPostByUrlDetailed(decryptedAccessToken, postUrl);
+    if (igPostResult.status === "FOUND") {
+      const igPost = igPostResult.post;
+      const caption = igPost.caption ?? "";
+      return {
+        status: "FOUND",
+        data: {
+          isPublic: await checkIsInstagramPostPublic(igPost.permalink),
+          caption,
+          isPaidPartnership: igPost.isPaidPartnership ?? false,
+          mentions: [...(caption.match(/@(\w+)/g) || [])].map((m) => m.slice(1)),
+          hashtags: [...(caption.match(/#(\w+)/g) || [])].map((h) => h.slice(1)),
+          postTimestamp: new Date(igPost.timestamp),
+          likeCount: igPost.likeCount,
+          commentCount: igPost.commentsCount,
+        },
+      };
+    }
+
+    if (igPostResult.status === "NOT_FOUND") {
+      return {
+        status: "CONFIRMED_DELETED",
+        reason: "Instagram post not found in creator's recent media",
+      };
+    }
+
+    // igPostResult.status === "API_ERROR"
+    return {
+      status: "CHECK_FAILED",
+      reason: igPostResult.error,
+    };
+  } catch (apiError) {
+    logger.warn("Instagram official verification failed", {
+      error: apiError instanceof Error ? apiError.message : String(apiError),
+    });
+    return {
+      status: "CHECK_FAILED",
+      reason: apiError instanceof Error ? apiError.message : String(apiError),
+    };
+  }
 }
-return null;
+
+export async function fetchInstagramPostData(
+  postUrl: string,
+  userId?: string,
+): Promise<VerifiedPostData | null> {
+  const result = await fetchInstagramPostDataDetailed(postUrl, userId);
+  return result.status === "FOUND" ? result.data : null;
+}
+
+export async function fetchYouTubePostDataDetailed(
+  postUrl: string,
+  userId?: string,
+): Promise<PostVerificationFetchResult> {
+  const youtubeId = extractVideoId(postUrl);
+  if (!youtubeId) {
+    return { status: "CHECK_FAILED", reason: "Invalid YouTube URL" };
+  }
+
+  try {
+    let accessToken: string | undefined;
+    if (userId) {
+      accessToken = (await getFreshYouTubeAccessToken(userId)) ?? undefined;
+    }
+
+    const ytResult = await getYouTubeVideoDetailed(youtubeId, accessToken);
+    if (ytResult.status === "FOUND") {
+      const ytVideo = ytResult.video;
+      const isPublic = ytVideo.privacyStatus ? ytVideo.privacyStatus === "public" : true;
+      return {
+        status: "FOUND",
+        data: {
+          isPublic,
+          isPaidPartnership: false,
+          caption: ytVideo.description,
+          mentions: [...(ytVideo.description.match(/@([\w.-]+)/g) || [])].map((m) => m.slice(1)),
+          hashtags: [...(ytVideo.description.match(/#(\w+)/g) || [])].map((h) => h.slice(1)),
+          postTimestamp: new Date(ytVideo.publishedAt),
+          likeCount: ytVideo.likeCount,
+          commentCount: ytVideo.commentCount,
+          viewCount: ytVideo.viewCount,
+        },
+      };
+    }
+
+    if (ytResult.status === "NOT_FOUND") {
+      return {
+        status: "CONFIRMED_DELETED",
+        reason: "YouTube video not found (confirmed gone from YouTube)",
+      };
+    }
+
+    // ytResult.status === "API_ERROR"
+    return {
+      status: "CHECK_FAILED",
+      reason: ytResult.error,
+    };
+  } catch (apiError) {
+    logger.warn("YouTube official verification failed", {
+      error: apiError instanceof Error ? apiError.message : String(apiError),
+    });
+    return {
+      status: "CHECK_FAILED",
+      reason: apiError instanceof Error ? apiError.message : String(apiError),
+    };
+  }
+}
+
+export async function fetchYouTubePostData(
+  postUrl: string,
+  userId?: string,
+): Promise<VerifiedPostData | null> {
+  const result = await fetchYouTubePostDataDetailed(postUrl, userId);
+  return result.status === "FOUND" ? result.data : null;
 }
 
 function performPostContentChecks(

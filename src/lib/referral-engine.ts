@@ -9,6 +9,7 @@ import { addUserXp, checkAndAwardBadges } from "./gamification-engine";
 import { NotificationService } from "@/services/notification.service";
 import { WalletService } from "@/services/wallet.service";
 import { checkChallengeProgress } from "./weekly-challenges";
+import { env } from "@/env";
 
 /**
 * Referral Engine 5-Tier System
@@ -753,7 +754,7 @@ return JSON.parse(cached);
 logger.warn("Redis read failed for getEffectivePlatformFee", { error: getErrorMessage(err) });
 }
 
-const baseFee = Number(process.env.PLATFORM_FEE_PERCENTAGE) || 10;
+const baseFee = env.PLATFORM_FEE_PERCENTAGE;
 
 const activeReferrals = await prisma.user.count({
 where: buildActiveReferralWhere(userId),

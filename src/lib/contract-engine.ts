@@ -10,6 +10,7 @@ import { addDays } from "date-fns";
 import { getDealTotalAmount } from "./utils";
 import { createActivityLog } from "./audit";
 import { PLATFORM_CONFIG } from "./platform-config";
+import { env } from "@/env";
 
 // ==================== TYPES ====================
 
@@ -219,7 +220,7 @@ productHandlingFee?: number;
 },
 ): ContractTerms {
 const dealAmount = proposal?.rate || campaign.perInfluencerBudget || 0;
-const platformFeePercent = Number(process.env.PLATFORM_FEE_PERCENTAGE) || 10;
+const platformFeePercent = env.PLATFORM_FEE_PERCENTAGE;
 const effectivePlatformFeePercent =
 proposal?.platformFeePercent ?? platformFeePercent;
 const productHandlingFee = proposal?.productHandlingFee ?? 0;
@@ -231,7 +232,7 @@ const gatewayFee =
 proposal?.gatewayFee ??
 Math.round(
 ((dealAmount + platformFee) *
-(Number(process.env.GATEWAY_FEE_PERCENTAGE) || 2)) /
+env.GATEWAY_FEE_PERCENTAGE) /
 100,
 );
 const totalAmount =

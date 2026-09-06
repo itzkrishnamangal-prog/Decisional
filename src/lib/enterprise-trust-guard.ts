@@ -1,6 +1,7 @@
 import prisma from "./db";
 import { logger } from "./logger";
 import { getISTStartOfDay } from "./drs-score";
+import { TRUST_SCORE_REVIEW_THRESHOLD } from "./constants";
 
 /**
 * Enterprise Risk & Trust Guard.
@@ -166,7 +167,7 @@ type WithdrawalSpeed = "INSTANT" | "24_HOURS" | "72_HOURS" | "MANUAL_REVIEW";
 export function getWithdrawalSpeed(trustScore: number): WithdrawalSpeed {
 if (trustScore >= 850) return "INSTANT";
 if (trustScore >= 750) return "24_HOURS";
-if (trustScore >= 600) return "72_HOURS";
+if (trustScore >= TRUST_SCORE_REVIEW_THRESHOLD) return "72_HOURS";
 return "MANUAL_REVIEW";
 }
 
@@ -175,6 +176,6 @@ return "MANUAL_REVIEW";
 * Determine if user is eligible to earn from referrals (stops bots farming code signups)
 */
 export function isEligibleForReferralEarnings(trustScore: number): boolean {
-return trustScore >= 600; // NORMAL tier or higher
+return trustScore >= TRUST_SCORE_REVIEW_THRESHOLD; // NORMAL tier or higher
 }
 

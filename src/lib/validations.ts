@@ -3,6 +3,7 @@
 */
 
 import { z } from "zod";
+import { env } from "@/env";
 
 /**
 * Database primary ID checker.
@@ -351,7 +352,13 @@ action: z.literal("confirm_received"),
 // ==================== PAYMENT SCHEMAS ====================
 
 export const withdrawalSchema = z.object({
-amount: z.number().int().min(50000, "Minimum withdrawal limit is 500 (50000 paise)"), // Spec Part 7B
+amount: z
+  .number()
+  .int()
+  .min(
+    env.MIN_WITHDRAWAL_AMOUNT,
+    `Minimum withdrawal limit is INR ${env.MIN_WITHDRAWAL_AMOUNT / 100} (${env.MIN_WITHDRAWAL_AMOUNT} paise)`,
+  ),
 bankAccountName: z.string().trim().min(2, "Invalid Account Name constraint"),
 bankAccountNumber: z
 .string()
