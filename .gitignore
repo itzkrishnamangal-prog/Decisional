@@ -19,6 +19,8 @@
 *.local
 .env
 .env*.local
+.env*.backup
+.env.backup
 .terraform-version
 .python-version
 
